@@ -15,6 +15,7 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
     if (window.__chattoNotificationBridged) return;
     window.__chattoNotificationBridged = true;
 
+    // Bridge Notification API to native notifications
     const OrigNotification = window.Notification;
     window.Notification = function(title, options) {
         if (window.__TAURI_INTERNALS__) {
