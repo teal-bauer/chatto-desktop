@@ -9,7 +9,10 @@
   let showSettings = $state(false);
 
   onMount(async () => {
-    // Listen for settings open from tray menu
+    const params = new URLSearchParams(window.location.search);
+    const forceSettings = params.has("settings");
+
+    // Listen for settings open from tray/menu
     await listen("open-settings", () => {
       showSettings = true;
     });
@@ -17,13 +20,11 @@
     // Check if server URL is already configured
     try {
       const url = await invoke<string | null>("get_server_url");
-      if (url) {
+      if (url && !forceSettings) {
         serverUrl = url;
-        // Server URL exists — Rust side navigates the webview.
-        // This Svelte UI is only visible before that navigation completes
-        // or when the user opens settings.
         loading = false;
       } else {
+        serverUrl = url ?? "";
         showSettings = true;
         loading = false;
       }
