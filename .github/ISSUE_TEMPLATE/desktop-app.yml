@@ -1,0 +1,48 @@
+name: Desktop App Issue
+description: Report a bug or request a feature for the Chatto desktop app
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue with Chatto Desktop! Please fill out the details below.
+  - type: dropdown
+    id: type
+    attributes:
+      label: Issue type
+      options:
+        - Bug
+        - Feature request
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in Chatto > About Chatto
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If reporting a bug, how can we reproduce it?

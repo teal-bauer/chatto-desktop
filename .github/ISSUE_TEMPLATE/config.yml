@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Chatto Web/Server Issue
+    url: https://chatto.run
+    about: For issues with the Chatto web app or server, please visit chatto.run.

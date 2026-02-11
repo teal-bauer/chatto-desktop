@@ -1,5 +1,9 @@
 # Chatto Desktop
 
+<p align="center">
+  <img src=".github/social-preview.png" alt="Chatto Desktop" width="640">
+</p>
+
 Native desktop wrapper for [Chatto](https://chatto.run) built with [Tauri v2](https://v2.tauri.app/).
 
 Loads your Chatto instance in a native webview with system tray integration, native notifications, auto-start, and deep link support.
