@@ -1,0 +1,4 @@
+[tools]
+node = "lts"
+rust = "stable"
+pnpm = "10"
