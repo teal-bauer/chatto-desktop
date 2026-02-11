@@ -94,7 +94,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 
 fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let about_metadata = AboutMetadataBuilder::new()
-        .version(Some("0.1.0"))
+        .version(Some(env!("GIT_VERSION")))
         .website(Some("https://github.com/teal-bauer/chatto-desktop"))
         .website_label(Some("GitHub"))
         .license(Some("AGPL-3.0"))
