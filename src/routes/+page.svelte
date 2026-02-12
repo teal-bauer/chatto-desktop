@@ -6,6 +6,7 @@
   let serverUrl = $state("");
   let error = $state("");
   let loading = $state(true);
+  let connecting = $state(false);
   let showSettings = $state(false);
   let notificationsEnabled = $state(true);
   let autostartEnabled = $state(false);
@@ -17,6 +18,7 @@
     // Listen for settings open from tray/menu
     await listen("open-settings", () => {
       showSettings = true;
+      connecting = false;
       loadPreferences();
     });
 
@@ -69,11 +71,17 @@
       return;
     }
 
+    // Show connecting screen before navigating away
+    showSettings = false;
+    connecting = true;
+
     try {
       await invoke("set_server_url", { url });
       // The webview will navigate to the server URL — this UI disappears
     } catch (e) {
       error = `Failed to connect: ${e}`;
+      connecting = false;
+      showSettings = true;
     }
   }
 
@@ -98,10 +106,16 @@
 
 {#if loading}
   <main class="container">
-    <p>Loading…</p>
+    <img src="/icon.png" alt="Chatto" class="icon icon-pulse" width="96" height="96" />
+  </main>
+{:else if connecting}
+  <main class="container">
+    <img src="/icon.png" alt="Chatto" class="icon icon-pulse" width="96" height="96" />
+    <p class="connecting">Connecting…</p>
   </main>
 {:else if showSettings}
   <main class="container">
+    <img src="/icon.png" alt="Chatto" class="icon" width="80" height="80" />
     <h1>Chatto</h1>
     <p class="subtitle">Desktop Settings</p>
 
@@ -192,6 +206,26 @@
     justify-content: center;
     min-height: 100vh;
     padding: 2rem;
+  }
+
+  .icon {
+    border-radius: 20px;
+    margin-bottom: 1.5rem;
+  }
+
+  .icon-pulse {
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(0.96); }
+  }
+
+  .connecting {
+    color: #888;
+    font-size: 1rem;
+    margin: 0;
   }
 
   h1 {
