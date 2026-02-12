@@ -27,15 +27,17 @@ Loads your Chatto instance in a native webview with system tray integration, nat
 ### Setup
 
 ```sh
-mise install        # install pinned Node, Rust, pnpm
-pnpm install        # install frontend dependencies
-pnpm tauri dev      # launch in dev mode
+mise install                    # install pinned Node, Rust, pnpm
+pnpm install                    # install frontend dependencies
+mise exec -- pnpm tauri dev     # launch in dev mode
 ```
+
+All build commands should be run through `mise exec --` to use the correct toolchain versions.
 
 ### Build
 
 ```sh
-pnpm tauri build    # produces .app, .dmg (macOS), .msi (Windows), .deb/.AppImage (Linux)
+mise exec -- pnpm tauri build   # produces .app, .dmg (macOS), .msi (Windows), .deb/.AppImage (Linux)
 ```
 
 ## License
