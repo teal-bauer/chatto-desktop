@@ -137,6 +137,9 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         "View",
         true,
         &[
+            &MenuItem::with_id(app, "menu_back", "Back", true, Some("CmdOrCtrl+["))?,
+            &MenuItem::with_id(app, "menu_forward", "Forward", true, Some("CmdOrCtrl+]"))?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "menu_reload", "Reload", true, Some("CmdOrCtrl+R"))?,
         ],
     )?;
@@ -165,6 +168,16 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         "menu_settings" => {
             if let Some(window) = app.get_webview_window("main") {
                 navigate_to_settings(&window);
+            }
+        }
+        "menu_back" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.eval("history.back()");
+            }
+        }
+        "menu_forward" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.eval("history.forward()");
             }
         }
         "menu_reload" => {
@@ -263,6 +276,7 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
         .title("Chatto")
         .inner_size(1024.0, 768.0)
         .min_inner_size(400.0, 300.0)
+        .disable_drag_drop_handler()
         .initialization_script(NOTIFICATION_BRIDGE_JS)
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);
