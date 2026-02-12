@@ -57,6 +57,16 @@ fn get_server_url(app: tauri::AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn show_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    // Check if notifications are enabled
+    let store = app.store("config.json").map_err(|e| e.to_string())?;
+    let enabled = store
+        .get("notifications_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !enabled {
+        return Ok(());
+    }
+
     use tauri_plugin_notification::NotificationExt;
     app.notification()
         .builder()
@@ -64,6 +74,39 @@ fn show_notification(app: tauri::AppHandle, title: String, body: String) -> Resu
         .body(&body)
         .show()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_notifications_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    let store = app.store("config.json").map_err(|e| e.to_string())?;
+    Ok(store
+        .get("notifications_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true))
+}
+
+#[tauri::command]
+fn set_notifications_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let store = app.store("config.json").map_err(|e| e.to_string())?;
+    store.set("notifications_enabled", json!(enabled));
+    store.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    Ok(app.autolaunch().is_enabled().unwrap_or(false))
+}
+
+#[tauri::command]
+fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())
+    }
 }
 
 fn frontend_url(path: &str) -> tauri::Url {
@@ -303,6 +346,10 @@ pub fn run() {
             set_server_url,
             get_server_url,
             show_notification,
+            get_notifications_enabled,
+            set_notifications_enabled,
+            get_autostart_enabled,
+            set_autostart_enabled,
         ])
         .setup(|app| {
             // Autostart

@@ -7,6 +7,8 @@
   let error = $state("");
   let loading = $state(true);
   let showSettings = $state(false);
+  let notificationsEnabled = $state(true);
+  let autostartEnabled = $state(false);
 
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
@@ -15,6 +17,7 @@
     // Listen for settings open from tray/menu
     await listen("open-settings", () => {
       showSettings = true;
+      loadPreferences();
     });
 
     // Check if server URL is already configured
@@ -27,12 +30,22 @@
         serverUrl = url ?? "";
         showSettings = true;
         loading = false;
+        await loadPreferences();
       }
     } catch {
       showSettings = true;
       loading = false;
     }
   });
+
+  async function loadPreferences() {
+    try {
+      notificationsEnabled = await invoke<boolean>("get_notifications_enabled");
+      autostartEnabled = await invoke<boolean>("get_autostart_enabled");
+    } catch {
+      // defaults are fine
+    }
+  }
 
   async function connect(event: Event) {
     event.preventDefault();
@@ -63,6 +76,24 @@
       error = `Failed to connect: ${e}`;
     }
   }
+
+  async function toggleNotifications() {
+    notificationsEnabled = !notificationsEnabled;
+    try {
+      await invoke("set_notifications_enabled", { enabled: notificationsEnabled });
+    } catch {
+      notificationsEnabled = !notificationsEnabled;
+    }
+  }
+
+  async function toggleAutostart() {
+    autostartEnabled = !autostartEnabled;
+    try {
+      await invoke("set_autostart_enabled", { enabled: autostartEnabled });
+    } catch {
+      autostartEnabled = !autostartEnabled;
+    }
+  }
 </script>
 
 {#if loading}
@@ -72,22 +103,56 @@
 {:else if showSettings}
   <main class="container">
     <h1>Chatto</h1>
-    <p class="subtitle">Connect to your Chatto server</p>
+    <p class="subtitle">Desktop Settings</p>
 
-    <form onsubmit={connect}>
-      <input
-        type="text"
-        bind:value={serverUrl}
-        placeholder="https://dev.chatto.run"
-        spellcheck="false"
-        autocomplete="off"
-      />
-      <button type="submit">Connect</button>
-    </form>
+    <div class="settings">
+      <section>
+        <h2>Server</h2>
+        <form onsubmit={connect}>
+          <input
+            type="text"
+            bind:value={serverUrl}
+            placeholder="https://dev.chatto.run"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button type="submit">Connect</button>
+        </form>
+        {#if error}
+          <p class="error">{error}</p>
+        {/if}
+      </section>
 
-    {#if error}
-      <p class="error">{error}</p>
-    {/if}
+      <section>
+        <h2>Preferences</h2>
+        <label class="toggle-row">
+          <span>Notifications</span>
+          <button
+            class="toggle"
+            class:active={notificationsEnabled}
+            onclick={toggleNotifications}
+            role="switch"
+            aria-checked={notificationsEnabled}
+            aria-label="Toggle notifications"
+          >
+            <span class="toggle-knob"></span>
+          </button>
+        </label>
+        <label class="toggle-row">
+          <span>Start at Login</span>
+          <button
+            class="toggle"
+            class:active={autostartEnabled}
+            onclick={toggleAutostart}
+            role="switch"
+            aria-checked={autostartEnabled}
+            aria-label="Toggle start at login"
+          >
+            <span class="toggle-knob"></span>
+          </button>
+        </label>
+      </section>
+    </div>
   </main>
 {/if}
 
@@ -112,6 +177,12 @@
     input:focus {
       border-color: #6366f1;
     }
+    h2 {
+      color: #999;
+    }
+    .toggle-row {
+      border-color: #333;
+    }
   }
 
   .container {
@@ -128,16 +199,36 @@
     margin: 0 0 0.25rem;
   }
 
+  h2 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #666;
+    margin: 0 0 0.75rem;
+  }
+
   .subtitle {
     color: #666;
     margin: 0 0 2rem;
   }
 
+  .settings {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  section {
+    display: flex;
+    flex-direction: column;
+  }
+
   form {
     display: flex;
     gap: 0.5rem;
-    width: 100%;
-    max-width: 480px;
   }
 
   input {
@@ -154,7 +245,7 @@
     border-color: #6366f1;
   }
 
-  button {
+  button[type="submit"] {
     padding: 0.75rem 1.5rem;
     background: #6366f1;
     color: white;
@@ -166,13 +257,58 @@
     transition: background 0.2s;
   }
 
-  button:hover {
+  button[type="submit"]:hover {
     background: #4f46e5;
   }
 
   .error {
     color: #ef4444;
-    margin-top: 1rem;
+    margin-top: 0.5rem;
     font-size: 0.875rem;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+  }
+
+  .toggle-row:last-child {
+    border-bottom: none;
+  }
+
+  .toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
+    border: none;
+    background: #ccc;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s;
+  }
+
+  .toggle.active {
+    background: #6366f1;
+  }
+
+  .toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  .toggle.active .toggle-knob {
+    transform: translateX(20px);
   }
 </style>
