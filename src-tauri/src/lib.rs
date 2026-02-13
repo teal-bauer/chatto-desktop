@@ -2,11 +2,12 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_store::StoreExt;
 
+#[cfg(desktop)]
 use tauri::{
     menu::{AboutMetadataBuilder, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    WebviewUrl, WebviewWindowBuilder,
 };
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use serde_json::json;
 
@@ -30,10 +31,13 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
     window.Notification.requestPermission = function() {
         return Promise.resolve('granted');
     };
+
+
 })();
 "#;
 
 // Template icon for macOS menu bar (black on transparent, used as template image)
+#[cfg(desktop)]
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
 
 #[tauri::command]
@@ -92,12 +96,14 @@ fn set_notifications_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(),
     store.save().map_err(|e| e.to_string())
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn get_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
     Ok(app.autolaunch().is_enabled().unwrap_or(false))
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
@@ -109,6 +115,7 @@ fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     }
 }
 
+#[cfg(desktop)]
 fn frontend_url(path: &str) -> tauri::Url {
     #[cfg(debug_assertions)]
     let base = "http://localhost:1420";
@@ -117,12 +124,14 @@ fn frontend_url(path: &str) -> tauri::Url {
     format!("{base}{path}").parse().unwrap()
 }
 
+#[cfg(desktop)]
 fn navigate_to_settings(window: &tauri::WebviewWindow) {
     let _ = window.navigate(frontend_url("/?settings"));
     let _ = window.show();
     let _ = window.set_focus();
 }
 
+#[cfg(desktop)]
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -135,6 +144,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let about_metadata = AboutMetadataBuilder::new()
         .version(Some(env!("GIT_VERSION")))
@@ -234,6 +244,7 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_hide = MenuItem::with_id(app, "show_hide", "Show/Hide", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
@@ -315,16 +326,20 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
         None => WebviewUrl::default(),
     };
 
-    let _window = WebviewWindowBuilder::new(app, "main", webview_url)
+    let builder = WebviewWindowBuilder::new(app, "main", webview_url)
+        .initialization_script(NOTIFICATION_BRIDGE_JS);
+
+    #[cfg(desktop)]
+    let builder = builder
         .title("Chatto")
         .inner_size(1024.0, 768.0)
         .min_inner_size(400.0, 300.0)
         .disable_drag_drop_handler()
-        .initialization_script(NOTIFICATION_BRIDGE_JS)
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);
-        })
-        .build()?;
+        });
+
+    let _window = builder.build()?;
 
     if url.is_none() {
         let _ = app.handle().emit("open-settings", ());
@@ -337,20 +352,30 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
 pub fn run() {
     let builder = tauri::Builder::default();
 
-    builder
+    #[cfg(desktop)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        set_server_url,
+        get_server_url,
+        show_notification,
+        get_notifications_enabled,
+        set_notifications_enabled,
+        get_autostart_enabled,
+        set_autostart_enabled,
+    ]);
+    #[cfg(mobile)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        set_server_url,
+        get_server_url,
+        show_notification,
+        get_notifications_enabled,
+        set_notifications_enabled,
+    ]);
+
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![
-            set_server_url,
-            get_server_url,
-            show_notification,
-            get_notifications_enabled,
-            set_notifications_enabled,
-            get_autostart_enabled,
-            set_autostart_enabled,
-        ])
         .setup(|app| {
             // Autostart
             #[cfg(desktop)]
@@ -387,22 +412,29 @@ pub fn run() {
             });
 
             // macOS menu bar
+            #[cfg(desktop)]
             setup_app_menu(app)?;
 
             // System tray
+            #[cfg(desktop)]
             setup_tray(app)?;
 
             // Create main window
             create_main_window(app)?;
 
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
-            }
-        })
+        });
+
+    // Close-to-tray on desktop only
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let _ = window.hide();
+            api.prevent_close();
+        }
+    });
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

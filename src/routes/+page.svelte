@@ -10,6 +10,7 @@
   let showSettings = $state(false);
   let notificationsEnabled = $state(true);
   let autostartEnabled = $state(false);
+  let autostartAvailable = $state(false);
 
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
@@ -43,9 +44,15 @@
   async function loadPreferences() {
     try {
       notificationsEnabled = await invoke<boolean>("get_notifications_enabled");
-      autostartEnabled = await invoke<boolean>("get_autostart_enabled");
     } catch {
       // defaults are fine
+    }
+    try {
+      autostartEnabled = await invoke<boolean>("get_autostart_enabled");
+      autostartAvailable = true;
+    } catch {
+      // autostart not available (mobile)
+      autostartAvailable = false;
     }
   }
 
@@ -53,11 +60,7 @@
     event.preventDefault();
     error = "";
 
-    let url = serverUrl.trim();
-    if (!url) {
-      error = "Please enter a server URL.";
-      return;
-    }
+    let url = serverUrl.trim() || "https://dev.chatto.run";
 
     // Add https:// if no protocol specified
     if (!/^https?:\/\//i.test(url)) {
@@ -124,11 +127,12 @@
         <h2>Server</h2>
         <form onsubmit={connect}>
           <input
-            type="text"
+            type="url"
             bind:value={serverUrl}
             placeholder="https://dev.chatto.run"
             spellcheck="false"
             autocomplete="off"
+            autocapitalize="off"
           />
           <button type="submit">Connect</button>
         </form>
@@ -152,6 +156,7 @@
             <span class="toggle-knob"></span>
           </button>
         </label>
+        {#if autostartAvailable}
         <label class="toggle-row">
           <span>Start at Login</span>
           <button
@@ -165,6 +170,7 @@
             <span class="toggle-knob"></span>
           </button>
         </label>
+        {/if}
       </section>
     </div>
   </main>
@@ -262,11 +268,13 @@
 
   form {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
   input {
-    flex: 1;
+    flex: 1 1 100%;
+    min-width: 0;
     padding: 0.75rem 1rem;
     border: 1px solid #ccc;
     border-radius: 8px;
@@ -280,6 +288,7 @@
   }
 
   button[type="submit"] {
+    width: 100%;
     padding: 0.75rem 1.5rem;
     background: #6366f1;
     color: white;
