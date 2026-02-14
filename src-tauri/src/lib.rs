@@ -42,13 +42,45 @@ const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
 
 #[tauri::command]
 fn set_server_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("Invalid URL: {e}"))?;
+
+    // Validate the server is reachable before saving
+    match ureq::head(parsed.as_str())
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+    {
+        Ok(_) => {}
+        Err(ureq::Error::Status(_, _)) => {
+            // Any HTTP response means the server is reachable
+        }
+        Err(ureq::Error::Transport(e)) => {
+            let reason = match e.kind() {
+                ureq::ErrorKind::Dns => "Server not found — check the address",
+                ureq::ErrorKind::ConnectionFailed => "Could not connect to server",
+                ureq::ErrorKind::Io => "Connection error",
+                _ => "Server unreachable",
+            };
+            return Err(format!("{reason} ({e})"));
+        }
+    }
+
     let store = app.store("config.json").map_err(|e| e.to_string())?;
     store.set("server_url", json!(url));
     store.save().map_err(|e| e.to_string())?;
 
     let window = app.get_webview_window("main").ok_or("no main window")?;
-    let parsed: tauri::Url = url.parse().map_err(|e| format!("invalid URL: {e}"))?;
     window.navigate(parsed).map_err(|e| e.to_string())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn clear_server_url(app: tauri::AppHandle) -> Result<(), String> {
+    let store = app.store("config.json").map_err(|e| e.to_string())?;
+    store.delete("server_url");
+    store.save().map_err(|e| e.to_string())?;
+
+    let window = app.get_webview_window("main").ok_or("no main window")?;
+    window.navigate(frontend_url("/")).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -125,10 +157,12 @@ fn frontend_url(path: &str) -> tauri::Url {
 }
 
 #[cfg(desktop)]
-fn navigate_to_settings(window: &tauri::WebviewWindow) {
-    let _ = window.navigate(frontend_url("/?settings"));
-    let _ = window.show();
-    let _ = window.set_focus();
+fn navigate_to_settings(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.navigate(frontend_url("/?settings"));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 #[cfg(desktop)]
@@ -219,9 +253,7 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Handle custom menu events
     app.on_menu_event(move |app, event| match event.id().as_ref() {
         "menu_settings" => {
-            if let Some(window) = app.get_webview_window("main") {
-                navigate_to_settings(&window);
-            }
+            navigate_to_settings(app);
         }
         "menu_back" => {
             if let Some(window) = app.get_webview_window("main") {
@@ -280,9 +312,7 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show_hide" => toggle_window_visibility(app),
             "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    navigate_to_settings(&window);
-                }
+                navigate_to_settings(app);
             }
             "autostart" => {
                 use tauri_plugin_autostart::ManagerExt;
@@ -356,6 +386,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         set_server_url,
         get_server_url,
+        clear_server_url,
         show_notification,
         get_notifications_enabled,
         set_notifications_enabled,

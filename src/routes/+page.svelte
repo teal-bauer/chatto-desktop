@@ -74,17 +74,14 @@
       return;
     }
 
-    // Show connecting screen before navigating away
-    showSettings = false;
     connecting = true;
 
     try {
       await invoke("set_server_url", { url });
       // The webview will navigate to the server URL — this UI disappears
     } catch (e) {
-      error = `Failed to connect: ${e}`;
+      error = `${e}`;
       connecting = false;
-      showSettings = true;
     }
   }
 
@@ -111,12 +108,7 @@
   <main class="container">
     <img src="/icon.png" alt="Chatto" class="icon icon-pulse" width="96" height="96" />
   </main>
-{:else if connecting}
-  <main class="container">
-    <img src="/icon.png" alt="Chatto" class="icon icon-pulse" width="96" height="96" />
-    <p class="connecting">Connecting…</p>
-  </main>
-{:else if showSettings}
+{:else if showSettings || connecting}
   <main class="container">
     <img src="/icon.png" alt="Chatto" class="icon" width="80" height="80" />
     <h1>Chatto</h1>
@@ -133,8 +125,11 @@
             spellcheck="false"
             autocomplete="off"
             autocapitalize="off"
+            disabled={connecting}
           />
-          <button type="submit">Connect</button>
+          <button type="submit" disabled={connecting}>
+            {connecting ? "Connecting…" : "Connect"}
+          </button>
         </form>
         {#if error}
           <p class="error">{error}</p>
@@ -300,8 +295,13 @@
     transition: background 0.2s;
   }
 
-  button[type="submit"]:hover {
+  button[type="submit"]:hover:not(:disabled) {
     background: #4f46e5;
+  }
+
+  button[type="submit"]:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .error {
