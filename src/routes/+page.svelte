@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   let serverUrl = $state("");
   let error = $state("");
@@ -12,18 +12,18 @@
   let autostartEnabled = $state(false);
   let autostartAvailable = $state(false);
 
+  let unlisten: UnlistenFn | undefined;
+
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
     const forceSettings = params.has("settings");
 
-    // Listen for settings open from tray/menu
-    await listen("open-settings", () => {
+    unlisten = await listen("open-settings", () => {
       showSettings = true;
       connecting = false;
       loadPreferences();
     });
 
-    // Check if server URL is already configured
     try {
       const url = await invoke<string | null>("get_server_url");
       if (url && !forceSettings) {
@@ -39,6 +39,10 @@
       showSettings = true;
       loading = false;
     }
+  });
+
+  onDestroy(() => {
+    unlisten?.();
   });
 
   async function loadPreferences() {
@@ -89,8 +93,9 @@
     notificationsEnabled = !notificationsEnabled;
     try {
       await invoke("set_notifications_enabled", { enabled: notificationsEnabled });
-    } catch {
+    } catch (e) {
       notificationsEnabled = !notificationsEnabled;
+      error = `Failed to update notifications: ${e}`;
     }
   }
 
@@ -98,8 +103,9 @@
     autostartEnabled = !autostartEnabled;
     try {
       await invoke("set_autostart_enabled", { enabled: autostartEnabled });
-    } catch {
+    } catch (e) {
       autostartEnabled = !autostartEnabled;
+      error = `Failed to update autostart: ${e}`;
     }
   }
 </script>
@@ -131,9 +137,6 @@
             {connecting ? "Connecting…" : "Connect"}
           </button>
         </form>
-        {#if error}
-          <p class="error">{error}</p>
-        {/if}
       </section>
 
       <section>
@@ -167,6 +170,9 @@
         </label>
         {/if}
       </section>
+      {#if error}
+        <p class="error">{error}</p>
+      {/if}
     </div>
   </main>
 {/if}
@@ -221,12 +227,6 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(0.96); }
-  }
-
-  .connecting {
-    color: #888;
-    font-size: 1rem;
-    margin: 0;
   }
 
   h1 {

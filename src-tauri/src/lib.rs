@@ -17,8 +17,6 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
     if (window.__chattoNotificationBridged) return;
     window.__chattoNotificationBridged = true;
 
-    // Bridge Notification API to native notifications
-    const OrigNotification = window.Notification;
     window.Notification = function(title, options) {
         if (window.__TAURI_INTERNALS__) {
             window.__TAURI_INTERNALS__.invoke('show_notification', {
@@ -26,14 +24,20 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
                 body: (options && options.body) || ''
             }).catch(function() {});
         }
-        try { return new OrigNotification(title, options); } catch(e) {}
+        this.title = title;
+        this.body = (options && options.body) || '';
+        this.icon = (options && options.icon) || '';
+        this.tag = (options && options.tag) || '';
+        this.onclick = null;
+        this.onclose = null;
+        this.onerror = null;
+        this.onshow = null;
+        this.close = function() {};
     };
     window.Notification.permission = 'granted';
     window.Notification.requestPermission = function() {
         return Promise.resolve('granted');
     };
-
-
 })();
 "#;
 
@@ -48,13 +52,16 @@ static ZOOM_LEVEL: AtomicI32 = AtomicI32::new(100);
 #[cfg(desktop)]
 fn apply_zoom(window: &tauri::WebviewWindow, delta: i32) {
     let level = if delta == 0 {
-        ZOOM_LEVEL.store(100, Ordering::Relaxed);
+        ZOOM_LEVEL.store(100, Ordering::SeqCst);
         100
     } else {
-        let current = ZOOM_LEVEL.load(Ordering::Relaxed);
-        let new_level = (current + delta).clamp(30, 300);
-        ZOOM_LEVEL.store(new_level, Ordering::Relaxed);
-        new_level
+        // fetch_update uses CAS internally, safe under concurrent access
+        let prev = ZOOM_LEVEL
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                Some((current + delta).clamp(30, 300))
+            })
+            .unwrap(); // always succeeds since closure always returns Some
+        (prev + delta).clamp(30, 300)
     };
     let _ = window.set_zoom(level as f64 / 100.0);
 }
@@ -63,23 +70,30 @@ fn apply_zoom(window: &tauri::WebviewWindow, delta: i32) {
 fn set_server_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     let parsed: tauri::Url = url.parse().map_err(|e| format!("Invalid URL: {e}"))?;
 
-    // Validate the server is reachable before saving
-    match ureq::head(parsed.as_str())
-        .timeout(std::time::Duration::from_secs(10))
-        .call()
-    {
-        Ok(_) => {}
-        Err(ureq::Error::Status(_, _)) => {
-            // Any HTTP response means the server is reachable
-        }
-        Err(ureq::Error::Transport(e)) => {
-            let reason = match e.kind() {
-                ureq::ErrorKind::Dns => "Server not found — check the address",
-                ureq::ErrorKind::ConnectionFailed => "Could not connect to server",
-                ureq::ErrorKind::Io => "Connection error",
-                _ => "Server unreachable",
-            };
-            return Err(format!("{reason} ({e})"));
+    // Skip reachability check for localhost (may use self-signed certs)
+    let is_localhost = parsed
+        .host_str()
+        .map(|h| h == "localhost" || h == "127.0.0.1" || h == "::1")
+        .unwrap_or(false);
+
+    if !is_localhost {
+        match ureq::head(parsed.as_str())
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+        {
+            Ok(_) => {}
+            Err(ureq::Error::Status(_, _)) => {
+                // Any HTTP response means the server is reachable
+            }
+            Err(ureq::Error::Transport(e)) => {
+                let reason = match e.kind() {
+                    ureq::ErrorKind::Dns => "Server not found — check the address",
+                    ureq::ErrorKind::ConnectionFailed => "Could not connect to server",
+                    ureq::ErrorKind::Io => "Connection error",
+                    _ => "Server unreachable",
+                };
+                return Err(format!("{reason} ({e})"));
+            }
         }
     }
 
@@ -172,7 +186,9 @@ fn frontend_url(path: &str) -> tauri::Url {
     let base = "http://localhost:1420";
     #[cfg(not(debug_assertions))]
     let base = "tauri://localhost";
-    format!("{base}{path}").parse().unwrap()
+    format!("{base}{path}")
+        .parse()
+        .expect("BUG: invalid frontend_url path")
 }
 
 #[cfg(desktop)]
@@ -341,13 +357,14 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let icon = tauri::image::Image::from_bytes(TRAY_ICON_BYTES)?;
 
+    let autostart_ref = autostart.clone();
     TrayIconBuilder::new()
         .icon(icon)
         .icon_as_template(true)
         .tooltip("Chatto")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "show_hide" => toggle_window_visibility(app),
             "settings" => {
                 navigate_to_settings(app);
@@ -355,11 +372,15 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "autostart" => {
                 use tauri_plugin_autostart::ManagerExt;
                 let autolaunch = app.autolaunch();
-                let enabled = autolaunch.is_enabled().unwrap_or(false);
-                if enabled {
-                    let _ = autolaunch.disable();
+                let was_enabled = autolaunch.is_enabled().unwrap_or(false);
+                let result = if was_enabled {
+                    autolaunch.disable()
                 } else {
-                    let _ = autolaunch.enable();
+                    autolaunch.enable()
+                };
+                if result.is_err() {
+                    // Revert the auto-toggled checkbox state on failure
+                    let _ = autostart_ref.set_checked(was_enabled);
                 }
             }
             "quit" => app.exit(0),
@@ -475,6 +496,10 @@ pub fn run() {
                 let urls = event.urls();
                 eprintln!("deep link opened: {:?}", urls);
                 if let Some(url) = urls.first() {
+                    if url.scheme() != "chatto" {
+                        eprintln!("rejected deep link with unexpected scheme: {}", url.scheme());
+                        return;
+                    }
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.navigate(url.clone());
                     }
