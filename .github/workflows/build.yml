@@ -18,12 +18,16 @@ jobs:
         include:
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
+            label: macos-aarch64
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
+            label: macos-x86_64
           - platform: ubuntu-22.04
             args: ''
+            label: linux
           - platform: windows-latest
             args: ''
+            label: windows
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -79,3 +83,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatto-${{ matrix.label }}
+          path: src-tauri/target/**/release/bundle/**
