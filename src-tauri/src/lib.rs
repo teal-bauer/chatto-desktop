@@ -10,6 +10,7 @@ use tauri::{
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use serde_json::json;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 const NOTIFICATION_BRIDGE_JS: &str = r#"
 (function() {
@@ -39,6 +40,24 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
 // Template icon for macOS menu bar (black on transparent, used as template image)
 #[cfg(desktop)]
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
+
+// Zoom level stored as percentage (100 = 100%). Step is 10%.
+#[cfg(desktop)]
+static ZOOM_LEVEL: AtomicI32 = AtomicI32::new(100);
+
+#[cfg(desktop)]
+fn apply_zoom(window: &tauri::WebviewWindow, delta: i32) {
+    let level = if delta == 0 {
+        ZOOM_LEVEL.store(100, Ordering::Relaxed);
+        100
+    } else {
+        let current = ZOOM_LEVEL.load(Ordering::Relaxed);
+        let new_level = (current + delta).clamp(30, 300);
+        ZOOM_LEVEL.store(new_level, Ordering::Relaxed);
+        new_level
+    };
+    let _ = window.set_zoom(level as f64 / 100.0);
+}
 
 #[tauri::command]
 fn set_server_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
@@ -227,6 +246,10 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &MenuItem::with_id(app, "menu_back", "Back", true, Some("CmdOrCtrl+["))?,
             &MenuItem::with_id(app, "menu_forward", "Forward", true, Some("CmdOrCtrl+]"))?,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "menu_zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?,
+            &MenuItem::with_id(app, "menu_zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+            &MenuItem::with_id(app, "menu_zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "menu_reload", "Reload", true, Some("CmdOrCtrl+R"))?,
         ],
     )?;
@@ -263,6 +286,21 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         "menu_forward" => {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.eval("history.forward()");
+            }
+        }
+        "menu_zoom_in" => {
+            if let Some(window) = app.get_webview_window("main") {
+                apply_zoom(&window, 10);
+            }
+        }
+        "menu_zoom_out" => {
+            if let Some(window) = app.get_webview_window("main") {
+                apply_zoom(&window, -10);
+            }
+        }
+        "menu_zoom_reset" => {
+            if let Some(window) = app.get_webview_window("main") {
+                apply_zoom(&window, 0);
             }
         }
         "menu_reload" => {
@@ -364,6 +402,7 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
         .title("Chatto")
         .inner_size(1024.0, 768.0)
         .min_inner_size(400.0, 300.0)
+        .zoom_hotkeys_enabled(true)
         .disable_drag_drop_handler()
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);
