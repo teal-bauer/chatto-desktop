@@ -184,7 +184,10 @@ fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 fn frontend_url(path: &str) -> tauri::Url {
     #[cfg(debug_assertions)]
     let base = "http://localhost:1420";
-    #[cfg(not(debug_assertions))]
+    // Windows/Android use http://tauri.localhost, others use tauri://localhost
+    #[cfg(all(not(debug_assertions), any(target_os = "windows", target_os = "android")))]
+    let base = "http://tauri.localhost";
+    #[cfg(all(not(debug_assertions), not(any(target_os = "windows", target_os = "android"))))]
     let base = "tauri://localhost";
     format!("{base}{path}")
         .parse()
@@ -222,22 +225,32 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .license(Some("AGPL-3.0"))
         .build();
 
-    let app_submenu = Submenu::with_items(
-        app,
-        "Chatto",
-        true,
-        &[
-            &PredefinedMenuItem::about(app, Some("About Chatto"), Some(about_metadata))?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "menu_settings", "Settings…", true, Some("CmdOrCtrl+,"))?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
-            &PredefinedMenuItem::show_all(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
-        ],
-    )?;
+    let about = PredefinedMenuItem::about(app, Some("About Chatto"), Some(about_metadata))?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let settings = MenuItem::with_id(app, "menu_settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+    let quit = PredefinedMenuItem::quit(app, None)?;
+
+    #[cfg(target_os = "macos")]
+    let app_submenu = {
+        let hide = PredefinedMenuItem::hide(app, None)?;
+        let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+        let show_all = PredefinedMenuItem::show_all(app, None)?;
+        let sep2 = PredefinedMenuItem::separator(app)?;
+        let sep3 = PredefinedMenuItem::separator(app)?;
+        Submenu::with_items(
+            app, "Chatto", true,
+            &[&about, &sep, &settings, &sep2, &hide, &hide_others, &show_all, &sep3, &quit],
+        )?
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let app_submenu = {
+        let sep2 = PredefinedMenuItem::separator(app)?;
+        Submenu::with_items(
+            app, "Chatto", true,
+            &[&about, &sep, &settings, &sep2, &quit],
+        )?
+    };
 
     let edit_submenu = Submenu::with_items(
         app,
