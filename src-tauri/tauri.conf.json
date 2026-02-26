@@ -18,6 +18,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,6 +32,12 @@
       "desktop": {
         "schemes": ["chatto"]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUzNDkyMTMxQzRCQTRFOUEKUldTYVRyckVNU0ZKVTdsZXRXV1JDRXFjdEoyTDRpc1pVY2lkY1d1L2xBaU9DbGdXdk93bUlsTm4K",
+      "endpoints": [
+        "https://github.com/teal-bauer/chatto-desktop/releases/latest/download/latest.json"
+      ]
     }
   }
 }

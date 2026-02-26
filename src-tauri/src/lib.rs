@@ -181,6 +181,81 @@ fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 }
 
 #[cfg(desktop)]
+async fn do_update_check(app: tauri::AppHandle, silent: bool) {
+    use tauri_plugin_notification::NotificationExt;
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            if !silent {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Update check failed")
+                    .body(&e.to_string())
+                    .show();
+            }
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            if silent {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Chatto update available")
+                    .body(&format!(
+                        "v{} is ready — use Chatto > Check for Updates to install",
+                        update.version
+                    ))
+                    .show();
+            } else {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(&format!("Downloading Chatto {}…", update.version))
+                    .body("Chatto will restart when the update is ready.")
+                    .show();
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    Ok(_) => app.restart(),
+                    Err(e) => {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Update failed")
+                            .body(&e.to_string())
+                            .show();
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            if !silent {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Chatto is up to date")
+                    .body(&format!("v{} is the latest version.", app.package_info().version))
+                    .show();
+            }
+        }
+        Err(e) => {
+            if !silent {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Update check failed")
+                    .body(&e.to_string())
+                    .show();
+            }
+        }
+    }
+}
+
+#[cfg(desktop)]
 fn frontend_url(path: &str) -> tauri::Url {
     #[cfg(debug_assertions)]
     let base = "http://localhost:1420";
@@ -227,6 +302,8 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let about = PredefinedMenuItem::about(app, Some("About Chatto"), Some(about_metadata))?;
     let sep = PredefinedMenuItem::separator(app)?;
+    let check_updates = MenuItem::with_id(app, "menu_check_updates", "Check for Updates…", true, None::<&str>)?;
+    let sep_updates = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "menu_settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     let quit = PredefinedMenuItem::quit(app, None)?;
 
@@ -239,7 +316,7 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let sep3 = PredefinedMenuItem::separator(app)?;
         Submenu::with_items(
             app, "Chatto", true,
-            &[&about, &sep, &settings, &sep2, &hide, &hide_others, &show_all, &sep3, &quit],
+            &[&about, &sep, &check_updates, &sep_updates, &settings, &sep2, &hide, &hide_others, &show_all, &sep3, &quit],
         )?
     };
 
@@ -248,7 +325,7 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let sep2 = PredefinedMenuItem::separator(app)?;
         Submenu::with_items(
             app, "Chatto", true,
-            &[&about, &sep, &settings, &sep2, &quit],
+            &[&about, &sep, &check_updates, &sep_updates, &settings, &sep2, &quit],
         )?
     };
 
@@ -304,6 +381,10 @@ fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle custom menu events
     app.on_menu_event(move |app, event| match event.id().as_ref() {
+        "menu_check_updates" => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(do_update_check(handle, false));
+        }
         "menu_settings" => {
             navigate_to_settings(app);
         }
@@ -496,6 +577,11 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_window_state::Builder::default().build())?;
 
+            // Auto-updater
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             // Deep links
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;
@@ -529,6 +615,13 @@ pub fn run() {
 
             // Create main window
             create_main_window(app)?;
+
+            // Background update check on startup
+            #[cfg(desktop)]
+            {
+                let update_handle = app.handle().clone();
+                tauri::async_runtime::spawn(do_update_check(update_handle, true));
+            }
 
             Ok(())
         });
