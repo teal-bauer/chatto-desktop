@@ -73,7 +73,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'Chatto v__VERSION__'
-          releaseBody: 'See the assets to download and install.'
+          releaseBody: ''
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
@@ -94,3 +94,18 @@ jobs:
         with:
           name: chatto-${{ matrix.label }}
           path: src-tauri/target/**/release/bundle/**
+
+  release-notes:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate release notes
+        run: gh release edit "${{ github.ref_name }}" --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
