@@ -107,8 +107,9 @@ jobs:
           fetch-depth: 0
       - name: Generate release notes
         run: |
-          release_id=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.id')
-          gh api --method PATCH repos/${{ github.repository }}/releases/$release_id \
-            -F generate_release_notes=true
+          release_id=$(gh api repos/${{ github.repository }}/releases \
+            --jq '[.[] | select(.draft)] | first | .id')
+          echo '{"generate_release_notes": true}' | \
+            gh api --method PATCH repos/${{ github.repository }}/releases/$release_id --input -
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
