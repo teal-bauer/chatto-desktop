@@ -64,6 +64,10 @@ fn apply_zoom(window: &tauri::WebviewWindow, delta: i32) {
         (prev + delta).clamp(30, 300)
     };
     let _ = window.set_zoom(level as f64 / 100.0);
+    if let Ok(store) = window.app_handle().store("config.json") {
+        store.set("zoom_level", json!(level));
+        let _ = store.save();
+    }
 }
 
 #[tauri::command]
@@ -523,7 +527,17 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
             let _ = window.set_title(&title);
         });
 
-    let _window = builder.build()?;
+    let window = builder.build()?;
+
+    // Restore persisted zoom level
+    #[cfg(desktop)]
+    if let Ok(store) = app.handle().store("config.json") {
+        if let Some(level) = store.get("zoom_level").and_then(|v| v.as_i64()) {
+            let level = (level as i32).clamp(30, 300);
+            ZOOM_LEVEL.store(level, Ordering::SeqCst);
+            let _ = window.set_zoom(level as f64 / 100.0);
+        }
+    }
 
     if url.is_none() {
         let _ = app.handle().emit("open-settings", ());
