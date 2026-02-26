@@ -107,9 +107,21 @@ jobs:
           fetch-depth: 0
       - name: Generate release notes
         run: |
+          tag="${{ github.ref_name }}"
+          prev_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || echo "")
+          range="${prev_tag:+${prev_tag}..}${tag}"
+
+          feats=$(git log "$range" --pretty=format:"%s" | grep "^feat" | sed 's/^feat[^:]*: /- /')
+          fixes=$(git log "$range" --pretty=format:"%s" | grep "^fix"  | sed 's/^fix[^:]*: /- /')
+
+          body=""
+          [ -n "$feats" ] && body+="## What's new"$'\n'"$feats"$'\n\n'
+          [ -n "$fixes" ] && body+="## Fixes"$'\n'"$fixes"$'\n\n'
+          body+="**Full changelog**: https://github.com/${{ github.repository }}/compare/${prev_tag}...${tag}"
+
           release_id=$(gh api repos/${{ github.repository }}/releases \
             --jq '[.[] | select(.draft)] | first | .id')
-          echo '{"generate_release_notes": true}' | \
-            gh api --method PATCH repos/${{ github.repository }}/releases/$release_id --input -
+          gh api --method PATCH repos/${{ github.repository }}/releases/$release_id \
+            -f body="$body"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
