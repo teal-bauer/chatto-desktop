@@ -204,14 +204,14 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(desktop)]
     let url = frontend_url("/?settings");
     #[cfg(mobile)]
-    let url = {
+    let url: tauri::Url = {
         #[cfg(target_os = "android")]
         let base = "http://tauri.localhost";
         #[cfg(target_os = "ios")]
         let base = "tauri://localhost";
         format!("{base}/?settings")
             .parse()
-            .map_err(|e| e.to_string())?
+            .map_err(|e: url::ParseError| e.to_string())?
     };
 
     window.navigate(url).map_err(|e| e.to_string())
