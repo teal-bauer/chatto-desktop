@@ -139,9 +139,13 @@ jobs:
         run: pnpm install
 
       - name: Build Android APK
-        run: pnpm tauri android build --apk
+        run: pnpm tauri android build --apk --debug
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.0.13004108
+
+      - name: Get version
+        id: version
+        run: echo "version=$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -152,14 +156,12 @@ jobs:
       - name: Upload APK to release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -not -name '*debug*' | head -1)
-          if [ -z "$apk" ]; then
-            apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
-          fi
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          version="${{ steps.version.outputs.version }}"
           release_id=$(gh api repos/${{ github.repository }}/releases \
             --jq '[.[] | select(.draft)] | first | .id')
           gh release upload "$(gh api repos/${{ github.repository }}/releases/$release_id --jq .tag_name)" \
-            "$apk#Chatto.apk" --clobber
+            "$apk#Chatto_${version}.apk" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
