@@ -44,32 +44,33 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
 #[cfg(mobile)]
 const MOBILE_SETTINGS_BUTTON_JS: &str = r#"
 (function() {
-    if (window.__chattoSettingsButton) return;
-    window.__chattoSettingsButton = true;
+    if (window.__chattoSettingsInjected) return;
+    window.__chattoSettingsInjected = true;
 
-    function createButton() {
-        if (document.getElementById('chatto-settings-btn')) return;
-        var btn = document.createElement('button');
-        btn.id = 'chatto-settings-btn';
-        btn.innerHTML = '&#9881;';
-        btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:999999;' +
-            'width:44px;height:44px;border-radius:50%;border:none;' +
-            'background:rgba(99,102,241,0.9);color:white;font-size:22px;' +
-            'cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);' +
-            'display:flex;align-items:center;justify-content:center;' +
-            '-webkit-tap-highlight-color:transparent;';
-        btn.addEventListener('click', function() {
+    function injectSidebarItem() {
+        if (document.getElementById('chatto-app-settings')) return;
+        var nav = document.querySelector('nav.flex.flex-col');
+        if (!nav) return;
+        var hasSettingsLinks = nav.querySelector('a[href*="/settings"]');
+        if (!hasSettingsLinks) return;
+
+        var a = document.createElement('a');
+        a.id = 'chatto-app-settings';
+        a.href = '#';
+        a.className = 'sidebar-item';
+        a.innerHTML = '<span class="sidebar-icon iconify uil--wrench"></span> App Settings';
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
             if (window.__TAURI_INTERNALS__) {
                 window.__TAURI_INTERNALS__.invoke('open_settings').catch(function() {});
             }
         });
-        document.body.appendChild(btn);
+        nav.appendChild(a);
     }
 
-    if (document.body) createButton();
-    else document.addEventListener('DOMContentLoaded', createButton);
-    new MutationObserver(function() { if (document.body) createButton(); })
-        .observe(document.documentElement, { childList: true });
+    var observer = new MutationObserver(function() { injectSidebarItem(); });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    if (document.body) injectSidebarItem();
 })();
 "#;
 
