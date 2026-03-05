@@ -73,6 +73,53 @@ const MOBILE_SETTINGS_BUTTON_JS: &str = r#"
 })();
 "#;
 
+#[cfg(desktop)]
+const EXTERNAL_LINK_JS: &str = r#"
+(function() {
+    if (window.__chattoExternalLinks) return;
+    window.__chattoExternalLinks = true;
+
+    var serverHost = window.location.hostname;
+
+    function isExternal(url) {
+        try {
+            var u = new URL(url, window.location.href);
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+            return u.hostname !== serverHost
+                && u.hostname !== 'localhost'
+                && u.hostname !== 'tauri.localhost';
+        } catch(e) { return false; }
+    }
+
+    function openExternal(url) {
+        if (window.__TAURI_INTERNALS__) {
+            window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: url })
+                .catch(function() { window.__TAURI_INTERNALS__.invoke('open_external_url', { url: url }).catch(function() {}); });
+        }
+    }
+
+    document.addEventListener('click', function(e) {
+        var a = e.target.closest('a[href]');
+        if (!a) return;
+        var href = a.href;
+        if (isExternal(href)) {
+            e.preventDefault();
+            e.stopPropagation();
+            openExternal(href);
+        }
+    }, true);
+
+    var origOpen = window.open;
+    window.open = function(url) {
+        if (url && isExternal(url)) {
+            openExternal(url);
+            return null;
+        }
+        return origOpen.apply(window, arguments);
+    };
+})();
+"#;
+
 // Template icon for macOS menu bar (black on transparent, used as template image)
 #[cfg(desktop)]
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
@@ -215,6 +262,15 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     };
 
     window.navigate(url).map_err(|e| e.to_string())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(desktop)]
@@ -578,6 +634,9 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
     let builder = WebviewWindowBuilder::new(app, "main", webview_url)
         .initialization_script(NOTIFICATION_BRIDGE_JS);
 
+    #[cfg(desktop)]
+    let builder = builder.initialization_script(EXTERNAL_LINK_JS);
+
     #[cfg(mobile)]
     let builder = builder.initialization_script(MOBILE_SETTINGS_BUTTON_JS);
 
@@ -642,6 +701,7 @@ pub fn run() {
         get_server_url,
         clear_server_url,
         open_settings,
+        open_external_url,
         show_notification,
         get_notifications_enabled,
         set_notifications_enabled,
