@@ -64,7 +64,7 @@
     event.preventDefault();
     error = "";
 
-    let url = serverUrl.trim() || "https://dev.chatto.run";
+    let url = serverUrl.trim() || "https://chat.chatto.run";
 
     // Add https:// if no protocol specified
     if (!/^https?:\/\//i.test(url)) {
@@ -125,9 +125,9 @@
         <h2>Server</h2>
         <form onsubmit={connect}>
           <input
-            type="url"
+            type="text"
             bind:value={serverUrl}
-            placeholder="https://dev.chatto.run"
+            placeholder="chat.chatto.run"
             spellcheck="false"
             autocomplete="off"
             autocapitalize="off"

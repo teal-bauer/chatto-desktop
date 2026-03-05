@@ -1,13 +1,13 @@
 [package]
-name = "chatto-desktop"
+name = "chatto-tauri"
 version = "0.3.1"
-description = "Desktop wrapper for Chatto"
+description = "Tauri wrapper for Chatto"
 authors = ["teal"]
 license = "AGPL-3.0-or-later"
 edition = "2021"
 
 [lib]
-name = "chatto_desktop_lib"
+name = "chatto_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

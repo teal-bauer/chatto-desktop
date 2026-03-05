@@ -41,6 +41,38 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
 })();
 "#;
 
+#[cfg(mobile)]
+const MOBILE_SETTINGS_BUTTON_JS: &str = r#"
+(function() {
+    if (window.__chattoSettingsButton) return;
+    window.__chattoSettingsButton = true;
+
+    function createButton() {
+        if (document.getElementById('chatto-settings-btn')) return;
+        var btn = document.createElement('button');
+        btn.id = 'chatto-settings-btn';
+        btn.innerHTML = '&#9881;';
+        btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:999999;' +
+            'width:44px;height:44px;border-radius:50%;border:none;' +
+            'background:rgba(99,102,241,0.9);color:white;font-size:22px;' +
+            'cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);' +
+            'display:flex;align-items:center;justify-content:center;' +
+            '-webkit-tap-highlight-color:transparent;';
+        btn.addEventListener('click', function() {
+            if (window.__TAURI_INTERNALS__) {
+                window.__TAURI_INTERNALS__.invoke('open_settings').catch(function() {});
+            }
+        });
+        document.body.appendChild(btn);
+    }
+
+    if (document.body) createButton();
+    else document.addEventListener('DOMContentLoaded', createButton);
+    new MutationObserver(function() { if (document.body) createButton(); })
+        .observe(document.documentElement, { childList: true });
+})();
+"#;
+
 // Template icon for macOS menu bar (black on transparent, used as template image)
 #[cfg(desktop)]
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon.png");
@@ -163,6 +195,26 @@ fn set_notifications_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(),
     let store = app.store("config.json").map_err(|e| e.to_string())?;
     store.set("notifications_enabled", json!(enabled));
     store.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("no main window")?;
+
+    #[cfg(desktop)]
+    let url = frontend_url("/?settings");
+    #[cfg(mobile)]
+    let url = {
+        #[cfg(target_os = "android")]
+        let base = "http://tauri.localhost";
+        #[cfg(target_os = "ios")]
+        let base = "tauri://localhost";
+        format!("{base}/?settings")
+            .parse()
+            .map_err(|e: tauri::url::ParseError| e.to_string())?
+    };
+
+    window.navigate(url).map_err(|e| e.to_string())
 }
 
 #[cfg(desktop)]
@@ -299,7 +351,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 fn setup_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let about_metadata = AboutMetadataBuilder::new()
         .version(Some(env!("GIT_VERSION")))
-        .website(Some("https://github.com/teal-bauer/chatto-desktop"))
+        .website(Some("https://github.com/teal-bauer/chatto-tauri"))
         .website_label(Some("GitHub"))
         .license(Some("AGPL-3.0"))
         .build();
@@ -513,19 +565,48 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
         None => WebviewUrl::default(),
     };
 
+    let server_host = url
+        .as_ref()
+        .and_then(|u| u.parse::<tauri::Url>().ok())
+        .and_then(|u| u.host_str().map(String::from));
+
     let builder = WebviewWindowBuilder::new(app, "main", webview_url)
         .initialization_script(NOTIFICATION_BRIDGE_JS);
 
+    #[cfg(mobile)]
+    let builder = builder.initialization_script(MOBILE_SETTINGS_BUTTON_JS);
+
     #[cfg(desktop)]
-    let builder = builder
-        .title("Chatto")
-        .inner_size(1024.0, 768.0)
-        .min_inner_size(400.0, 300.0)
-        .zoom_hotkeys_enabled(true)
-        .disable_drag_drop_handler()
-        .on_document_title_changed(|window, title| {
-            let _ = window.set_title(&title);
-        });
+    let builder = {
+        let server_host_clone = server_host.clone();
+        let app_handle = app.handle().clone();
+        builder
+            .title("Chatto")
+            .inner_size(1024.0, 768.0)
+            .min_inner_size(400.0, 300.0)
+            .zoom_hotkeys_enabled(true)
+            .disable_drag_drop_handler()
+            .on_document_title_changed(|window, title| {
+                let _ = window.set_title(&title);
+            })
+            .on_navigation(move |url| {
+                let navigating_host = url.host_str().unwrap_or_default();
+                if url.scheme() == "tauri"
+                    || url.scheme() == "about"
+                    || navigating_host == "localhost"
+                    || navigating_host == "tauri.localhost"
+                    || server_host_clone
+                        .as_ref()
+                        .map(|h| navigating_host == h.as_str())
+                        .unwrap_or(false)
+                {
+                    return true;
+                }
+                use tauri_plugin_opener::OpenerExt;
+                let _ = app_handle.opener().open_url(url.as_str(), None::<&str>);
+                false
+            })
+    };
 
     let window = builder.build()?;
 
@@ -555,6 +636,7 @@ pub fn run() {
         set_server_url,
         get_server_url,
         clear_server_url,
+        open_settings,
         show_notification,
         get_notifications_enabled,
         set_notifications_enabled,
@@ -565,6 +647,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         set_server_url,
         get_server_url,
+        open_settings,
         show_notification,
         get_notifications_enabled,
         set_notifications_enabled,
