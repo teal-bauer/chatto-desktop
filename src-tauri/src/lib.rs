@@ -17,18 +17,46 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
     if (window.__chattoNotificationBridged) return;
     window.__chattoNotificationBridged = true;
 
-    // Always appear as a background tab so the web app sends notifications
-    // regardless of whether the Chatto window is currently visible or focused.
+    // When the Chatto window is hidden in the tray the webview is still alive
+    // but the real visibilityState becomes 'visible' (the webview doesn't
+    // track native window visibility). We override the Page Visibility API
+    // dynamically: force 'hidden' only while the native window is hidden so
+    // the web app sends notifications then, but restore normal behaviour when
+    // the window is shown so presence ("ONLINE/AWAY") works correctly.
     try {
+        var __chattoWindowHidden = false;
         Object.defineProperty(document, 'visibilityState', {
-            get: function() { return 'hidden'; },
+            get: function() { return __chattoWindowHidden ? 'hidden' : document.__realVisibilityState; },
             configurable: true,
         });
         Object.defineProperty(document, 'hidden', {
-            get: function() { return true; },
+            get: function() { return __chattoWindowHidden ? true : document.__realHidden; },
             configurable: true,
         });
+        // Stash the real values under non-standard names.
+        Object.defineProperty(document, '__realVisibilityState', {
+            get: function() { return 'visible'; },
+            configurable: true,
+            writable: true,
+        });
+        Object.defineProperty(document, '__realHidden', {
+            get: function() { return false; },
+            configurable: true,
+            writable: true,
+        });
     } catch(e) {}
+
+    // Listen for Tauri events that track whether the native window is hidden.
+    if (window.__TAURI_INTERNALS__) {
+        window.__TAURI_INTERNALS__.listen('chatto:window-hidden', function() {
+            window.__chattoWindowHidden = true;
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+        window.__TAURI_INTERNALS__.listen('chatto:window-shown', function() {
+            window.__chattoWindowHidden = false;
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+    }
 
     window.Notification = function(title, options) {
         if (window.__TAURI_INTERNALS__) {
@@ -401,6 +429,7 @@ fn navigate_to_settings(app: &tauri::AppHandle) {
         let _ = window.navigate(frontend_url("/?settings"));
         let _ = window.show();
         let _ = window.set_focus();
+        let _ = window.emit("chatto:window-shown", ());
     }
 }
 
@@ -409,10 +438,12 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
+            let _ = window.emit("chatto:window-hidden", ());
         } else {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
+            let _ = window.emit("chatto:window-shown", ());
         }
     }
 }
@@ -628,7 +659,6 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Forward a file drop from Explorer into the webview by injecting JS that
 /// constructs File objects and dispatches dragenter/dragover/drop events.
-/// Limited to 20 MB per file to stay within reasonable JS string sizes.
 #[cfg(target_os = "windows")]
 fn forward_file_drop(
     window: &tauri::WebviewWindow,
@@ -864,6 +894,7 @@ pub fn run() {
         match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
+                let _ = window.emit("chatto:window-hidden", ());
                 api.prevent_close();
             }
             #[cfg(target_os = "windows")]
@@ -886,6 +917,7 @@ pub fn run() {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
+                        let _ = window.emit("chatto:window-shown", ());
                     }
                 }
             }
