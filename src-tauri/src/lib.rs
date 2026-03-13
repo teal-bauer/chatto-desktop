@@ -1,4 +1,4 @@
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_store::StoreExt;
 
@@ -11,6 +11,8 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use serde_json::json;
 use std::sync::atomic::{AtomicI32, Ordering};
+
+const DEFAULT_SERVER_URL: &str = "https://chat.chatto.run";
 
 const NOTIFICATION_BRIDGE_JS: &str = r#"
 (function() {
@@ -299,7 +301,8 @@ fn clear_server_url(app: tauri::AppHandle) -> Result<(), String> {
     store.save().map_err(|e| e.to_string())?;
 
     let window = app.get_webview_window("main").ok_or("no main window")?;
-    window.navigate(frontend_url("/")).map_err(|e| e.to_string())
+    let default_url: tauri::Url = DEFAULT_SERVER_URL.parse().expect("invalid DEFAULT_SERVER_URL");
+    window.navigate(default_url).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -780,16 +783,14 @@ fn get_server_url_from_store(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let url = get_server_url_from_store(app.handle());
+    let url = get_server_url_from_store(app.handle())
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
 
-    let webview_url = match &url {
-        Some(u) => WebviewUrl::External(u.parse()?),
-        None => WebviewUrl::default(),
-    };
+    let webview_url = WebviewUrl::External(url.parse()?);
 
     let server_host = url
-        .as_ref()
-        .and_then(|u| u.parse::<tauri::Url>().ok())
+        .parse::<tauri::Url>()
+        .ok()
         .and_then(|u| u.host_str().map(String::from));
 
     let builder = WebviewWindowBuilder::new(app, "main", webview_url)
@@ -833,10 +834,6 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
             ZOOM_LEVEL.store(level, Ordering::SeqCst);
             let _ = window.set_zoom(level as f64 / 100.0);
         }
-    }
-
-    if url.is_none() {
-        let _ = app.handle().emit("open-settings", ());
     }
 
     Ok(())

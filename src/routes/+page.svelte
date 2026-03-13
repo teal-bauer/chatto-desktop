@@ -4,6 +4,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   let serverUrl = $state("");
+  let hasOverride = $state(false);
   let error = $state("");
   let loading = $state(true);
   let connecting = $state(false);
@@ -16,7 +17,7 @@
 
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
-    const forceSettings = params.has("settings");
+    showSettings = params.has("settings");
 
     unlisten = await listen("open-settings", () => {
       showSettings = true;
@@ -26,19 +27,15 @@
 
     try {
       const url = await invoke<string | null>("get_server_url");
-      if (url && !forceSettings) {
-        serverUrl = url;
-        loading = false;
-      } else {
-        serverUrl = url ?? "";
-        showSettings = true;
-        loading = false;
+      hasOverride = !!url;
+      serverUrl = url ?? "";
+      if (showSettings) {
         await loadPreferences();
       }
     } catch {
       showSettings = true;
-      loading = false;
     }
+    loading = false;
   });
 
   onDestroy(() => {
@@ -82,11 +79,25 @@
 
     try {
       await invoke("set_server_url", { url });
+      hasOverride = true;
       // The webview will navigate to the server URL — this UI disappears
     } catch (e) {
       error = `${e}`;
       connecting = false;
     }
+  }
+
+  async function resetToDefault() {
+    error = "";
+    connecting = true;
+    try {
+      await invoke("clear_server_url");
+      hasOverride = false;
+      serverUrl = "";
+    } catch (e) {
+      error = `${e}`;
+    }
+    connecting = false;
   }
 
   async function toggleNotifications() {
@@ -127,15 +138,20 @@
           <input
             type="text"
             bind:value={serverUrl}
-            placeholder="chat.chatto.run"
+            placeholder="chat.chatto.run (default)"
             spellcheck="false"
             autocomplete="off"
             autocapitalize="off"
             disabled={connecting}
           />
           <button type="submit" disabled={connecting}>
-            {connecting ? "Connecting…" : "Connect"}
+            {connecting ? "Connecting…" : hasOverride ? "Update" : "Connect"}
           </button>
+          {#if hasOverride}
+            <button type="button" class="reset-btn" onclick={resetToDefault} disabled={connecting}>
+              Reset to Default
+            </button>
+          {/if}
         </form>
       </section>
 
@@ -302,6 +318,39 @@
   button[type="submit"]:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .reset-btn {
+    width: 100%;
+    padding: 0.625rem 1.5rem;
+    background: transparent;
+    color: #666;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .reset-btn:hover:not(:disabled) {
+    background: #f5f5f5;
+    color: #333;
+  }
+
+  .reset-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .reset-btn {
+      color: #999;
+      border-color: #444;
+    }
+    .reset-btn:hover:not(:disabled) {
+      background: #2a2a2a;
+      color: #ccc;
+    }
   }
 
   .error {
