@@ -145,6 +145,37 @@ const NOTIFICATION_BRIDGE_JS: &str = r#"
 })();
 "#;
 
+#[cfg(target_os = "android")]
+const ACTIVE_ROOM_TRACKER_JS: &str = r#"
+(function() {
+    if (window.__chattoRoomTracker) return;
+    window.__chattoRoomTracker = true;
+
+    function reportRoom() {
+        var m = window.location.pathname.match(/^\/chat\/[^\/]+\/([^\/]+)/);
+        var roomId = m ? m[1] : '';
+        // Call Android JavascriptInterface directly — no Rust IPC needed
+        if (window.ChattoAndroid && window.ChattoAndroid.setActiveRoom) {
+            window.ChattoAndroid.setActiveRoom(roomId);
+        }
+    }
+
+    var _pushState = history.pushState;
+    history.pushState = function() {
+        _pushState.apply(history, arguments);
+        reportRoom();
+    };
+    var _replaceState = history.replaceState;
+    history.replaceState = function() {
+        _replaceState.apply(history, arguments);
+        reportRoom();
+    };
+    window.addEventListener('popstate', reportRoom);
+
+    reportRoom();
+})();
+"#;
+
 #[cfg(mobile)]
 const MOBILE_SETTINGS_BUTTON_JS: &str = r#"
 (function() {
@@ -801,6 +832,9 @@ fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
 
     #[cfg(mobile)]
     let builder = builder.initialization_script(MOBILE_SETTINGS_BUTTON_JS);
+
+    #[cfg(target_os = "android")]
+    let builder = builder.initialization_script(ACTIVE_ROOM_TRACKER_JS);
 
     #[cfg(desktop)]
     let builder = {

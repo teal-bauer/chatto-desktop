@@ -33,6 +33,10 @@ class NotificationService : Service() {
         private const val DEFAULT_SERVER_URL = "https://chat.chatto.run"
         private const val MAX_RECONNECT_DELAY_MS = 60_000L
 
+        /** Current room the user is viewing — suppress notifications for this room */
+        @Volatile
+        var activeRoomId: String? = null
+
         fun start(context: Context) {
             val intent = Intent(context, NotificationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -57,7 +61,11 @@ class NotificationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(FOREGROUND_NOTIF_ID, buildForegroundNotification())
+        try {
+            startForeground(FOREGROUND_NOTIF_ID, buildForegroundNotification())
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not start foreground: ${e.message}")
+        }
         connectIfNeeded()
         return START_STICKY
     }
@@ -234,11 +242,6 @@ class NotificationService : Service() {
                                     event {
                                         __typename
                                         ... on NotificationCreatedEvent { spaceId roomId }
-                                        ... on MentionNotificationEvent {
-                                            mentionedBy { displayName }
-                                            room { name }
-                                            space { name }
-                                        }
                                     }
                                 }
                             }
@@ -254,19 +257,18 @@ class NotificationService : Service() {
                     ?.optJSONObject("event")
                     ?: return
 
-                when (event.optString("__typename")) {
-                    "NotificationCreatedEvent" -> {
-                        val roomId = event.optString("roomId", "")
-                        val spaceId = event.optString("spaceId", "DM")
-                        if (roomId.isNotBlank() && shouldFire(roomId)) {
-                            fetchRoomEventAndNotify(spaceId, roomId)
-                        }
-                    }
-                    "MentionNotificationEvent" -> {
-                        val spaceName = event.optJSONObject("space")?.optString("name") ?: "Chatto"
-                        val who = event.optJSONObject("mentionedBy")?.optString("displayName") ?: "Someone"
-                        val room = event.optJSONObject("room")?.optString("name") ?: "a room"
-                        showMessageNotification(spaceName, "$who mentioned you in #$room")
+                val typeName = event.optString("__typename")
+                Log.d(TAG, "Event: $typeName ${event.toString().take(200)}")
+                // Only handle NotificationCreatedEvent — MentionNotificationEvent
+                // fires alongside it and would cause duplicates.
+                if (typeName == "NotificationCreatedEvent") {
+                    val roomId = event.optString("roomId", "")
+                    val spaceId = event.optString("spaceId", "DM")
+                    if (roomId == activeRoomId) return
+                    if (roomId.isNotBlank() && shouldFire(roomId)) {
+                        fetchRoomEventAndNotify(spaceId, roomId)
+                    } else {
+                        Log.d(TAG, "Skipped: roomId=$roomId activeRoom=$activeRoomId shouldFire=${roomId.isNotBlank()}")
                     }
                 }
             }
@@ -296,8 +298,15 @@ class NotificationService : Service() {
         val serverUrl = getServerUrl()
         val cookies = getCookies(serverUrl) ?: return
 
+        val isDm = spaceId == "DM"
+        // For DMs, skip space/room name lookup — there's no meaningful space or channel name
+        val gql = if (isDm) {
+            "query(\$s:ID!,\$r:ID!){roomEvents(spaceId:\$s,roomId:\$r,limit:1){actor{displayName}event{__typename...on MessagePostedEvent{body}}}}"
+        } else {
+            "query(\$s:ID!,\$r:ID!){roomEvents(spaceId:\$s,roomId:\$r,limit:1){actor{displayName}event{__typename...on MessagePostedEvent{body}}} room(spaceId:\$s,roomId:\$r){name} space(id:\$s){name}}"
+        }
         val query = JSONObject().apply {
-            put("query", "query(\$s:ID!,\$r:ID!){roomEvents(spaceId:\$s,roomId:\$r,limit:1){actor{displayName}event{__typename...on MessagePostedEvent{body}}}}")
+            put("query", gql)
             put("variables", JSONObject().apply {
                 put("s", spaceId)
                 put("r", roomId)
@@ -316,27 +325,34 @@ class NotificationService : Service() {
         client?.newCall(request)?.enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {
                 Log.w(TAG, "Failed to fetch room event: ${e.message}")
-                showMessageNotification("Chatto", "New message")
+                showMessageNotification("Chatto", "New message", null, null, null)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 try {
-                    val json = JSONObject(response.body?.string() ?: "{}")
-                    val events = json.optJSONObject("data")?.optJSONArray("roomEvents")
+                    val rawBody = response.body?.string() ?: "{}"
+                    Log.d(TAG, "GraphQL response (${response.code}): ${rawBody.take(500)}")
+                    val json = JSONObject(rawBody)
+                    val data = json.optJSONObject("data")
+
+                    val spaceName = data?.optJSONObject("space")?.optString("name")
+                    val roomName = data?.optJSONObject("room")?.optString("name")
+
+                    val events = data?.optJSONArray("roomEvents")
                     if (events != null && events.length() > 0) {
                         val ev = events.getJSONObject(0)
                         val actor = ev.optJSONObject("actor")?.optString("displayName") ?: "Chatto"
                         val msgBody = ev.optJSONObject("event")?.optString("body")
                         if (!msgBody.isNullOrBlank()) {
-                            showMessageNotification(actor, msgBody)
+                            showMessageNotification(actor, msgBody, spaceName, roomName, "$serverUrl/chat/$spaceId/$roomId")
                             return
                         }
                     }
                     // Fallback
-                    showMessageNotification("Chatto", "New message")
+                    showMessageNotification("Chatto", "New message", spaceName, roomName, "$serverUrl/chat/$spaceId/$roomId")
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse room event: ${e.message}")
-                    showMessageNotification("Chatto", "New message")
+                    showMessageNotification("Chatto", "New message", null, null, null)
                 }
             }
         })
@@ -346,24 +362,44 @@ class NotificationService : Service() {
 
     private var notifCounter = 100
 
-    private fun showMessageNotification(title: String, body: String) {
+    private fun showMessageNotification(
+        title: String,
+        body: String,
+        spaceName: String?,
+        roomName: String?,
+        navigateUrl: String?
+    ) {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (navigateUrl != null) {
+                putExtra("navigate_url", navigateUrl)
+            }
         }
         val pending = PendingIntent.getActivity(
             this, notifCounter, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = Notification.Builder(this, NOTIF_CHANNEL_ID)
+        // Build context line: "#channel in Space" or just "#channel" or just "Space"
+        val context = when {
+            !roomName.isNullOrBlank() && !spaceName.isNullOrBlank() -> "#$roomName in $spaceName"
+            !roomName.isNullOrBlank() -> "#$roomName"
+            !spaceName.isNullOrBlank() -> spaceName
+            else -> null
+        }
+
+        val builder = Notification.Builder(this, NOTIF_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentIntent(pending)
             .setAutoCancel(true)
-            .build()
+
+        if (context != null) {
+            builder.setSubText(context)
+        }
 
         val mgr = getSystemService(NotificationManager::class.java)
-        mgr.notify(notifCounter++, notification)
+        mgr.notify(notifCounter++, builder.build())
     }
 }
