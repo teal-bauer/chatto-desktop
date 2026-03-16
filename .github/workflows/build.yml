@@ -165,21 +165,29 @@ jobs:
           name: chatto-android
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
 
+  upload-android:
+    needs: [build, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: chatto-android
+
       - name: Upload APK to release
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          version="${{ steps.version.outputs.version }}"
-          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
-          cp "$apk" "Chatto_${version}.apk"
-          release_id=$(gh api repos/${{ github.repository }}/releases \
-            --jq '[.[] | select(.draft)] | first | .id')
-          tag=$(gh api repos/${{ github.repository }}/releases/$release_id --jq .tag_name)
-          gh release upload "$tag" "Chatto_${version}.apk" --clobber
+          apk=$(find . -name '*.apk' | head -1)
+          tag="${GITHUB_REF#refs/tags/}"
+          cp "$apk" "Chatto_${tag}.apk"
+          gh release upload "$tag" "Chatto_${tag}.apk" --clobber --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-notes:
-    needs: [build, build-android]
+    needs: [build, build-android, upload-android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
